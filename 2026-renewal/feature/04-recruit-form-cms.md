@@ -31,36 +31,41 @@
 이 기능의 진짜 난이도는 폼 빌더가 아니라, **main과 backoffice가 같은 MySQL/Sequelize 기반 `members` 테이블을 서로 다른 서버에서 공유하는 운영 구조 자체를 바꾸는 일**에 있다.
 
 ```mermaid
-graph TB
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
+graph LR
     subgraph Current["현재 구조"]
-        direction TB
+        direction LR
         subgraph MainFE["main/frontend"]
+            direction TB
             MF1["recruit/page.tsx<br/>formData shape 완전 고정"]
             MF2["세미나 기본값 true, 해제 불가"]
             MF3["전화번호 자동 하이픈 로직 하드코딩"]
             MF4["FormData.append 개별 필드명 직접 매핑"]
         end
         subgraph MainBE["main/backend"]
-            MB1["recruit_R2.js<br/>upload.single('portfolio_pdf') — 파일 1개 고정"]
+            direction TB
+            MB1["recruit_R2.js<br/>upload.single('portfolio_pdf') - 파일 1개 고정"]
             MB2["semina/dev/study/external 활동별 validation 하드코딩"]
             MB3["student_id 기반 중복 체크 고정"]
-            MB4["파일명: 퀴푸_25_1-학번이름 — 연도/학기 하드코딩"]
+            MB4["파일명: 퀴푸_25_1-학번이름 - 연도/학기 하드코딩"]
         end
         subgraph BOFE["backoffice/frontend"]
+            direction TB
             BF1["recruitDB.jsx<br/>목록 표 컬럼 완전 고정"]
             BF2["모달 상세: 고정 필드별 분기 렌더링"]
             BF3["엑셀 export: json_to_sheet(data) 그대로"]
             BF4["포트폴리오 다운로드: filename 기반 고정 API"]
         end
         subgraph BOBE["backoffice/backend"]
-            BB1["member.js — 같은 Member 테이블 직접 조회"]
-            BB2["feature.js — Feature(recruit) 한 줄 토글"]
+            direction TB
+            BB1["member.js - 같은 Member 테이블 직접 조회"]
+            BB2["feature.js - Feature(recruit) 한 줄 토글"]
         end
-        DB[(MySQL<br/>members 테이블<br/>+ Feature 테이블)]
-        MainBE -->|"INSERT"| DB
-        BOBE -->|"SELECT"| DB
-        BOBE -->|"UPDATE Feature"| DB
     end
+    DB[(MySQL<br/>members 테이블<br/>+ Feature 테이블)]
+    MainBE -->|"INSERT"| DB
+    BOBE -->|"SELECT"| DB
+    BOBE -->|"UPDATE Feature"| DB
 ```
 
 #### 핵심 결합 포인트 상세
@@ -150,6 +155,7 @@ graph TB
 ### 4.1 구글폼 핵심 구조
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 graph LR
     Form --> Info["info: title, description"]
     Form --> Settings["settings: isAcceptingResponses"]
@@ -387,6 +393,7 @@ RecruitResponse:
 조건부 표시는 **필드 단위**와 **섹션 단위** 모두 지원한다. 섹션에 `conditionalLogic`이 설정된 경우 해당 섹션 전체가 조건부로 표시/숨김된다. 섹션이 숨겨지면 소속 필드는 개별 `conditionalLogic`과 무관하게 전부 숨겨진다.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 flowchart TD
     A["섹션의 conditionalLogic 존재?"] -->|있음| B["섹션 가시성 평가"]
     A -->|없음| C["섹션 표시"]
@@ -472,6 +479,7 @@ function evaluateLogic(
 사용자가 폼을 조회한 뒤 작성하는 동안 운영자가 폼을 수정하거나 상태를 변경할 수 있다.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 sequenceDiagram
     participant User as 사용자
     participant Server as 서버
@@ -519,6 +527,7 @@ sequenceDiagram
 기존 MySQL/Sequelize 기반 시스템을 **완전히 대체**한다.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 flowchart LR
     A["기존 MySQL<br/>members + Feature"] -->|"폐기"| X["사용하지 않음"]
     B["2026 이후"] -->|"신규"| C["MongoDB<br/>RecruitForm + RecruitResponse"]
@@ -562,26 +571,26 @@ flowchart LR
 ### 7.6 전환 타임라인
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 gantt
     title 마이그레이션 타임라인
-    dateFormat YYYY-MM
-    section 선행 의존
-    01-bo-auth (Google OAuth)          :dep, 2025-07, 3w
+    dateFormat YYYY-MM-DD
+    axisFormat %m/%d
     section Phase 1
-    Mongoose 모델 + 타입 정의          :p1, after dep, 1w
-    백엔드 공개 API (조회/제출)         :p2, after p1, 2w
+    Mongoose 모델 + 타입 정의          :p1, 2026-03-23, 4d
+    백엔드 공개 API (조회/제출)         :p2, after p1, 6d
     section Phase 2
-    메인 웹 동적 폼 렌더러             :p3, after p2, 3w
-    백엔드 백오피스 API                :p4, after p2, 2w
+    메인 웹 동적 폼 렌더러             :p3, after p2, 7d
+    백엔드 백오피스 API                :p4, after p2, 5d
     section Phase 3
-    백오피스 폼 빌더 UI                :p5, after p4, 4w
-    백오피스 응답 조회 (동적)           :p6, after p4, 3w
+    백오피스 폼 빌더 UI                :p5, after p4, 7d
+    백오피스 응답 조회 (동적)           :p6, after p4, 6d
     section Phase 4
-    파일 업로드 연동                   :p7, after p6, 2w
-    통합 QA                           :p8, after p7, 2w
+    파일 업로드 연동                   :p7, after p6, 4d
+    통합 QA                           :p8, after p7, 4d
     section 전환
     기존 시스템 폐기                  :milestone, after p8, 0d
-    2026-1 모집 시작                  :milestone, 2026-02, 0d
+    2026-1 모집 시작                  :milestone, 2026-04-22, 0d
 ```
 
 ---
@@ -885,6 +894,7 @@ async function handleSubmit(formId: string, formVersion: number, answers: FieldA
 ### 12.1 업로드 흐름
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 flowchart LR
     A["메인 웹에서<br/>multipart/form-data 제출"] --> B["백엔드에서<br/>file_upload 타입 필드 식별"]
     B --> C["fileConfig 검증<br/>(accept, maxSizeMB, maxFiles)<br/>프론트+백엔드 양쪽 수행"]
@@ -920,6 +930,7 @@ R2 업로드와 DB 저장 사이에 실패가 발생할 수 있다. Orphan file(
 ### 13.1 화면 구성
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 graph TB
     subgraph FormBuilder["폼 빌더 — QUIPU 2026-1 모집 폼 &nbsp; [저장] [미리보기] [상태: draft ▼]"]
         direction TB
@@ -948,6 +959,7 @@ graph TB
 ### 13.2 필드 설정 패널
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 graph TB
     subgraph FieldSettings["필드 설정"]
         direction TB
@@ -978,6 +990,7 @@ graph TB
 ### 13.4 상태 전환 규칙
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 stateDiagram-v2
     [*] --> draft : 폼 생성
     draft --> published : 게시 (동시에 1개만)
@@ -1004,6 +1017,7 @@ stateDiagram-v2
 ### 14.1 렌더링 흐름
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables': {'primaryColor':'transparent','primaryBorderColor':'#999999','primaryTextColor':'#111111','lineColor':'#666666','secondaryColor':'transparent','tertiaryColor':'transparent','clusterBkg':'transparent','clusterBorder':'#999999'}}}%%
 flowchart TD
     A["GET /recruit-form/active"] --> B{"status === published?"}
     B -->|아니거나 없음| C["모집 기간이 아닙니다 표시"]
