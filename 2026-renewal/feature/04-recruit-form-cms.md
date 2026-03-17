@@ -584,7 +584,6 @@ gantt
     통합 QA                           :p8, after p7, 4d
     section 전환
     기존 시스템 폐기                  :milestone, after p8, 0d
-    2026-1 모집 시작                  :milestone, 2026-04-22, 0d
 ```
 
 ---
