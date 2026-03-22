@@ -1,4 +1,4 @@
-# 01. BO Auth 실행 명세서 (PM용)
+# 01. BO Auth 실행 명세서
 
 ## Executive Summary
 
