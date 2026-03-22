@@ -1,410 +1,175 @@
-# 01. BO Auth 고도화 명세서
+# 01. BO Auth 실행 명세서 (PM용)
+
+## Executive Summary
+
+- Safari 인증 이슈와 권한 모델 확장성 문제를 동시에 해결한다.
+- 인증은 Google OAuth + Authorization 토큰 기반으로 전환한다.
+- 권한은 확장 가능한 구조로 단순화하고, 슈퍼어드민 운영 통제를 강화한다.
+- 2주 내 단계적 전환과 rollback 전략으로 도입 리스크를 관리한다.
 
 ## 0) 문서 목적
 
-본 문서는 `02-feature-roadmap.md`의 1번 기능(백오피스 인증/권한 체계 고도화)에 대한 구현 기준 문서다.  
-핵심 목표는 **Google OAuth 단일 로그인**, **사전 등록 계정만 접근 허용**, **라벨 기반 권한 분리**, **슈퍼어드민 전용 사용자 관리**를 통해 운영 보안과 유지보수성을 동시에 높이는 것이다.
+본 문서는 백오피스 인증/권한 체계 고도화의 PM 의사결정용 실행 계획이다.  
+기술 구현 세부는 별도 Appendix 문서로 분리한다.
 
-이 문서는 실제 코드베이스를 직접 확인한 뒤 작성했다.
+- 기술 Appendix: [01-bo-auth-appendix.md](./01-bo-auth-appendix.md)
 
-- backoffice 현재 인증: `passport-local + 세션` 단일 비밀번호 방식
-- main 현재 인증: 관리자 인증 체계 없음(공개 서비스 API 중심)
+## 1) Expected Impact
 
----
+- Safari의 third-party cookie 제한 이슈를 제거하기 위해 cookie 기반 인증에서 Authorization header 기반 인증으로 전환, 인증 실패율 감소(특히 Safari 환경)
+- 권한 관련 운영 이슈 감소(CS/운영 문의 티켓 기준)
+- 관리자 계정 생성/권한 변경 작업 시간 감소
+- 계정/권한 보안 사고 리스크 감소
+- 정량 목표/측정 기준은 `9) Success Metrics`를 따른다.
+- baseline은 개편 전 최근 7일 서버 로그인 API 로그를 기준으로 산정한다.
+
+## 2) Risk if not implemented
 
-## 1) 현재 구현 진단 (As-Is)
+- Safari 인증 이슈가 지속된다.
+- 권한 확장 시 기술 부채가 누적된다.
+- 계정/보안 운영 비용이 계속 증가한다.
+
+### Phase 1 (3/24~3/27, 4일): 인증 전환
+
+- Google OAuth + Authorization 토큰 기반 로그인 전환
+- 크로스 도메인 안정화
+- 기존 로그인 fallback 유지
+
+완료 기준:
 
-## 1.1 Backoffice
+- Safari 포함 주요 브라우저 로그인 성공
+- 인증 성공률 99% 이상 (QA + staging 로그 기준)
+- Safari 환경에서 access token 만료 후 refresh 기반 세션 복구(silent refresh) 성공
+- Safari cross-domain refresh 검증은 Appendix `P) 테스트 전략`의 QA 시나리오 기준으로 판정
 
-- 인증 방식
-  - 비밀번호 입력 후 `POST /bo/auth/login`
-  - 서버는 `process.env.PASSWORD`(bcrypt hash)와 비교
-  - 성공 시 세션에 `admin` 사용자 직렬화
-- 접근 제어
-  - `isLoggedIn` 미들웨어로 로그인 여부만 확인
-  - 권한 레벨(읽기/쓰기/기능별) 없음
-- 문제점
-  - 계정 단위 추적 불가(누가 로그인했는지 구분 안 됨)
-  - 권한 분리 불가(모든 로그인 사용자가 동일 권한)
-  - 감사 로그/관리자 변경 이력 부재
-  - 확장성 부족(운영 인원 증가 시 보안 리스크 확대)
-
-## 1.2 Main
-
-- 현재 main은 공개 사용자를 위한 서비스이며 관리자 인증 체계가 없다.
-- 모집 ON/OFF 같은 운영 제어는 feature API로 조회하는 구조가 있으나, 관리자 권한 모델과 연결되어 있지 않다.
-- 따라서 운영 정책의 단일 진실원(Single Source of Truth)을 backoffice 인증/권한 시스템으로 세우는 것이 필요하다.
-
----
-
-## 2) 목표 상태 (To-Be)
-
-## 2.1 인증 정책
-
-- 로그인 방식은 **Google OAuth 2.0 단일화**
-- 비밀번호 로그인/로컬 전략 완전 제거
-- 사전 등록된 Google 계정만 접근 허용 (`allowlist`)
-
-## 2.2 권한 정책
-
-권한 라벨(최소 단위):
-
-- `read/all`
-- `write/all`
-- `write/activity`
-- `write/recruit-form`
-
-권한 해석 규칙:
-
-- `write/all`은 모든 write 라벨을 포함하는 상위 권한
-- 조회 권한은 기본적으로 `read/all` 필요
-
-## 2.3 슈퍼어드민 정책
-
-- 슈퍼어드민 Google 계정은 고정값(환경변수)으로 관리
-- 슈퍼어드민만 사용자 등록/권한 부여/권한 변경 가능
-- 마지막 슈퍼어드민 제거 금지
-
----
-
-## 3) 사용자 시나리오 (UX 중심)
-
-## 3.1 로그인 UX
-
-- 로그인 화면에서 비밀번호 입력 제거
-- `Google로 로그인` 버튼 1개 제공
-- 인증 실패 시 사유를 사용자 친화 문구로 안내
-  - 허용되지 않은 계정
-  - 계정 비활성화
-  - 권한 없음
-
-## 3.2 권한 기반 UX
-
-- 읽기 전용 계정은 조회만 가능(수정 버튼 비활성 + 이유 툴팁)
-- 기능별 write 권한이 없으면 해당 액션 CTA 숨김 또는 비활성화
-- API 403 발생 시 공통 에러 처리(권한 부족 메시지 + 관리자 문의 안내)
-
-## 3.3 관리자 UX
-
-- 슈퍼어드민 전용 사용자 관리 화면 제공
-  - 사용자 검색/필터(활성, 비활성, 권한별)
-  - 권한 체크박스 기반 부여/회수
-  - 변경 내역 감사 로그 조회
-- 실수 방지 UX
-  - 위험한 작업(예 : 계정 비활성화, 권한 제거 등) 2차 확인창 실행.
-  - 자기 자신의 super-admin 해제 불가. super admin이 자기 계정에서 is_super_admin 권한을 스스로 끌 수 없게 막는 것. 마지막 관리자 권한을 실수로 없애서 아무도 사용자 / 권한 관리를 못 하게 되는 사고 방지
-
----
-
-## 4) 데이터 모델 설계 (DX 중심)
-
-## 4.1 Sequelize 모델
-
-### `users`
-
-- `id` (PK)
-- `google_sub` (string, unique, not null)
-- `email` (string, unique, not null)
-- `name` (string, nullable)
-- `picture_url` (string, nullable)
-- `is_active` (boolean, default true)
-- `is_super_admin` (boolean, default false)
-- `last_login_at` (date, nullable)
-- timestamps
-
-인덱스:
-
-- unique(`google_sub`)
-- unique(`email`)
-- index(`is_active`)
-
-### `permission_labels`
-
-- `id` (PK)
-- `code` (string, unique)  
-  허용값: `read/all`, `write/all`, `write/activity`, `write/recruit-form`
-- `description` (string)
-- timestamps
-
-### `user_permissions`
-
-- `id` (PK)
-- `user_id` (FK -> users.id)
-- `permission_label_id` (FK -> permission_labels.id)
-- timestamps
-
-인덱스:
-
-- unique(`user_id`, `permission_label_id`)
-- index(`permission_label_id`)
-
-### `admin_audit_logs` (권장)
-
-- `id` (PK)
-- `actor_user_id` (FK -> users.id)
-- `target_user_id` (FK -> users.id, nullable)
-- `action` (string)
-- `before_json` (JSON)
-- `after_json` (JSON)
-- `ip` (string)
-- `user_agent` (string)
-- timestamps
-
----
-
-## 5) 인증/인가 아키텍처
-
-## 5.1 인증 흐름
-
-1. 프론트: `GET /bo/auth/google` 호출
-2. 백엔드: Google OAuth consent 페이지로 리다이렉트
-3. Google callback: `GET /bo/auth/google/callback`
-4. 서버: `profile.sub`, `email` 추출
-5. DB `users` 조회
-6. 미등록/비활성 계정이면 403 + 로그인 실패 페이지로 리다이렉트
-7. 등록 계정이면 `req.login()` 후 세션 발급
-8. 프론트에서 `/bo/auth/me`로 사용자/권한 정보 로드
-
-## 5.2 Passport 구성
-
-- `passport-google-oauth20` 사용
-- `serializeUser`: 최소 식별자(`user.id`)만 저장
-- `deserializeUser`: `users + permissions` 로딩
-
-## 5.3 세션 저장
-
-기본 권장: Redis 기반 세션 스토어
-
-- 이유
-  - 멀티 인스턴스/스케일아웃 대응
-  - 메모리 스토어 대비 안정성 우수
-  - 세션 만료/강제 로그아웃 관리 용이
-
-쿠키 정책:
-
-- `httpOnly: true`
-- `secure: true` (prod)
-- `sameSite: "None"` (cross-site 운영 시)
-- `maxAge`: 2시간(요구 운영 정책에 따라 조정)
-
----
-
-## 6) 백엔드 API 명세 (Auth/Admin)
-
-## 6.1 Auth API
-
-### `GET /bo/auth/google`
-
-- 설명: Google OAuth 시작
-- 응답: Google로 리다이렉트
-
-### `GET /bo/auth/google/callback`
-
-- 설명: OAuth 콜백 처리
-- 성공: FE 성공 URL로 리다이렉트
-- 실패: FE 로그인 URL로 리다이렉트(`?reason=unauthorized`)
-
-### `GET /bo/auth/me`
-
-- 설명: 현재 로그인 사용자 정보
-- 응답 예:
-
-```json
-{
-  "id": 12,
-  "email": "user@uos.ac.kr",
-  "name": "홍길동",
-  "is_super_admin": false,
-  "permissions": ["read/all", "write/activity"]
-}
-```
-
-### `POST /bo/auth/logout`
-
-- 설명: 세션 종료
-- 응답: 200
-
-## 6.2 Super Admin 전용 User Management API
-
-prefix: `/bo/admin/users`
-
-### `GET /bo/admin/users`
-
-- 사용자 목록 + 권한 + 활성 상태 조회
-
-### `POST /bo/admin/users`
-
-- 사용자 등록
-- body:
-  - `email` (required)
-  - `name` (optional)
-  - `permissions` (array)
-  - `is_active` (optional, default true)
-
-### `PATCH /bo/admin/users/:id`
-
-- 사용자 기본 정보/활성 상태/권한 일괄 수정
-
-### `POST /bo/admin/users/:id/permissions`
-
-- 권한 추가
-- body: `code`
-
-### `DELETE /bo/admin/users/:id/permissions/:code`
-
-- 권한 제거
-
-### `GET /bo/admin/audit-logs`
-
-- 감사 로그 조회(페이징/필터)
-
----
-
-## 7) 권한 체크 미들웨어 설계
-
-## 7.1 미들웨어 목록
-
-- `requireAuth`
-  - 세션 존재 + 사용자 활성 상태 확인
-- `requireAnyPermission([...codes])`
-  - 권한 교집합 확인
-- `requireSuperAdmin`
-  - `is_super_admin === true` + 고정 슈퍼어드민 이메일 검증
-
-## 7.2 권한 판정 규칙
-
-- `write/all` 보유 시:
-  - `write/activity`, `write/recruit-form` 자동 허용
-- 읽기 API:
-  - `read/all` 또는 `write/all` 허용(운영 정책 선택)
-
----
-
-## 8) 기존 API 권한 매핑
-
-- `GET /bo/member` -> `read/all`
-- `GET /bo/member/pdf/:filename` -> `read/all`
-- `POST /bo/semina` -> `write/activity` 또는 `write/all`
-- `GET /bo/feature/recruit` -> `read/all`
-- `PATCH /bo/feature/recruit` -> `write/recruit-form` 또는 `write/all`
-
-추가 제안:
-
-- 권한 실패 응답 포맷 통일
-
-```json
-{
-  "code": "FORBIDDEN",
-  "message": "해당 작업 권한이 없습니다.",
-  "required_permissions": ["write/recruit-form", "write/all"]
-}
-```
-
----
-
-## 9) 프론트 명세 (Backoffice)
-
-## 9.1 로그인 페이지
-
-- 기존 비밀번호 인풋 제거
-- 버튼: `Google로 로그인`
-- 실패 사유별 UI:
-  - `unauthorized_account`
-  - `inactive_account`
-  - `no_permission`
-
-## 9.2 앱 부팅 흐름
-
-1. 앱 시작 시 `/bo/auth/me` 호출
-2. 성공 시 사용자 상태 전역 저장
-3. 실패 시 로그인 페이지 유지
-4. 라우트 가드에서 권한 확인
-
-## 9.3 권한 기반 컴포넌트 제어
-
-- `Can` 컴포넌트(또는 hook) 도입
-  - `can("write/recruit-form")` 형태로 사용
-  - 버튼 숨김/비활성화 정책 일관화
-
----
-
-## 10) 보안 요구사항
-
-- OAuth state 검증 필수(CSRF 방지)
-- 세션 고정 공격 방지(`session.regenerate`)
-- CORS는 정확한 Origin 화이트리스트만 허용
-- 허용 계정 검증은 반드시 서버 DB 기준
-- 에러 메시지에 내부 정책 과다 노출 금지
-- 사용자/권한 변경 API는 모두 감사 로그 적재
-
-## 10.1) 보안 필수 체크리스트 (출시 게이트)
-
-아래 항목은 운영 배포 전 `모두 충족`되어야 한다.
-
-- OAuth `state` 검증을 서버에서 강제한다.
-- Google 사용자 식별은 `email` 단독이 아닌 `google_sub`를 기준으로 처리한다.
-- 세션 쿠키는 `HttpOnly=true`, `Secure=true(prod)`, `SameSite` 정책을 명시한다.
-- 로그인 성공 시 `req.session.regenerate()`로 세션 고정 공격을 방지한다.
-- 모든 쓰기 API는 서버 측 권한 검사(`requireAnyPermission`)를 통과해야 한다.
-- 슈퍼어드민 API는 서버 측에서 `requireSuperAdmin`으로만 접근 허용한다.
-- 계정/권한 변경 이벤트는 `admin_audit_logs`에 actor/target/ip/user-agent를 기록한다.
-- CSRF 보호를 적용한다(특히 쿠키 기반 세션 사용 시 필수).
-- CORS 허용 Origin은 정확한 도메인만 화이트리스트로 제한한다.
-- Rate limiting을 적용한다(로그인 시도, 권한 실패 반복 요청 포함).
-- 권한 오류/로그인 실패/관리자 작업 로그를 모니터링 대시보드에서 확인 가능해야 한다.
-- 프론트는 권한 기반 UI 제어를 하되, 권한 통제의 진실원은 서버임을 유지한다.
-- XSS 방지를 위해 입력 검증/출력 인코딩/CSP 정책을 함께 적용한다.
-- 퇴부원 또는 운영 제외 계정은 즉시 `is_active=false` 처리 후 접근 차단한다.
-- 마지막 슈퍼어드민 제거/비활성화는 서버에서 금지한다.
-
----
-
-## 11) DX(확장성/운영성) 설계 포인트
-
-- 권한 문자열 상수화(`PermissionCodes`)로 오타 방지
-- 라우트-권한 매핑 중앙 관리(예: `authorizationMap.ts`)
-- 테스트 우선순위:
-  - 인증 성공/실패
-  - 미등록 계정 차단
-  - 권한별 200/403
-  - super-admin 전용 API 보호
-- 운영 편의:
-  - 관리자 변경 로그 검색
-  - 계정 비활성화 즉시 반영
-  - 세션 만료/강제 로그아웃 정책 문서화
-
----
-
-## 12) 단계별 구현 계획 (Small Steps)
-
-1. 모델/마이그레이션 추가 (`users`, `permission_labels`, `user_permissions`, `admin_audit_logs`)
-2. permission label 시드 데이터 삽입
-3. Google OAuth 전략 추가 + local 로그인 제거
-4. `/bo/auth/google`, `/callback`, `/me`, `/logout` 구현
-5. 세션 스토어 Redis 적용
-6. `requireAuth`, `requireAnyPermission`, `requireSuperAdmin` 구현
-7. 기존 업무 API에 권한 매핑 적용
-8. super-admin 사용자 관리 API 구현
-9. 프론트 로그인 UI/라우트가드/권한 가드 반영
-10. 통합 테스트 + 운영 점검 + 배포
-
----
-
-## 13) 수용 기준 (Acceptance Criteria)
-
-- 비밀번호 로그인 경로 제거 및 사용 불가
-- 등록되지 않은 Google 계정 로그인 차단
-- 권한 없는 사용자의 쓰기 API 호출 시 403
-- 슈퍼어드민이 아닌 사용자는 계정/권한 관리 API 접근 불가
-- 슈퍼어드민은 사용자 등록 및 권한 변경 가능
-- 로그인 후 `/bo/auth/me`에서 권한 라벨 확인 가능
-- 감사 로그에 사용자/권한 변경 이력이 남음
-
----
-
-## 14) 현재 코드 대비 변경 영향 요약
-
-- Backoffice는 인증 코어가 전면 교체된다(`local -> google oauth`).
-- 라우트 보호 기준이 `로그인 여부`에서 `로그인 + 권한`으로 강화된다.
-- 운영팀의 사용자 관리 기능이 코드/DB/UX 전반에 새로 추가된다.
-- Main은 직접 인증 기능 추가 대상은 아니지만, 운영 제어 기능의 신뢰 소스가 Backoffice 권한 모델로 정리된다.
+### Phase 2 (3/28~4/2, 5일): 권한 모델 전환
+
+- 권한 모델 전환(확장 가능한 구조)
+- 관리자 권한 관리 UX 정리
+- `/bo/auth/me` 최신 상태 기준 확정
+- 리스크:
+  - 권한 모델 전환 시 기존 권한 불일치 가능성
+- 대응:
+  - 병행 검증 기간: Phase 2 전체 기간(3/28~4/2)
+  - 검증 방법: 신규 권한 모델 결과와 기존 권한 기준 결과를 관리자 계정 전체 대상 대조
+  - 완료 판단: QA 환경에서 권한 오검증 0건 확인 후 Phase 3 진입
+  - 불일치 발생 시: 신규 모델 적용 즉시 중단 -> 원인 분석 -> 수정 후 재검증
+
+완료 기준:
+
+- 권한 오검증 0건
+- 권한 변경 즉시 반영 정책 동작
+- 초대 플로우 E2E(초대 생성 -> 링크 접속 -> Google 로그인 -> 권한 부여) QA 통과
+
+### Phase 3 (4/3~4/5, 4일): 감사/보안 고도화
+
+- 감사 로그/보안 이벤트 모니터링
+- 보안 정책 마감(rate limit, 토큰 운영, 경보 연계)
+- 릴리스 점검 및 운영 인수
+
+완료 기준:
+
+- 보안 체크리스트 충족(Appendix `D`, `I`, `J`, `K`, `P` 기준)
+- 운영 대시보드/알림 체계 확인
+- 기존 세션 로그인 경로 제거 완료(rollback 비상 경로 제외)
+
+## 4) 설계 선택 근거 (요약)
+
+- 인증 방식 전환(세션 쿠키 -> Authorization header):
+  - FE/BE 크로스 도메인 환경에서 Safari third-party cookie 제한 이슈를 줄이기 위한 선택
+  - Access Token은 header로 전달해 인증 안정성을 확보하고, refresh는 별도 보안 정책으로 관리
+- 슈퍼어드민 판단 기준 단일화:
+  - 서버 시작 시 `SUPER_ADMIN_EMAIL`로 DB를 bootstrap(보정)하되
+  - 런타임 권한 판단은 항상 DB `isSuperAdmin`만 사용
+- 권한 모델 전환(라벨 조인 -> `perm` 비트마스크):
+  - 권한 라벨 증가 시 조인 복잡도를 줄이고 확장성을 확보
+  - 내부 저장은 비트마스크, 운영 UI는 기존 라벨 형태를 유지해 가독성 보전
+- 데이터 저장소 전환(MySQL/Sequelize -> MongoDB):
+  - 메인/백오피스 DB 스택을 단일화해 운영 복잡도와 이중 관리 비용을 낮춤
+  - 문서/구현 기준은 MongoDB 모델을 소스 오브 트루스로 사용
+
+## 5) Prerequisites / Dependencies
+
+Phase 1 시작 게이팅(필수, Day 1 전 완료):
+
+- Google Cloud OAuth 설정(Client ID/Secret, Redirect URI)
+- FE/BE 도메인/CORS/TLS 확정
+- Safari 대응 인증 경로 확정: Option A(리버스 프록시 기반 same-site 정렬) 적용
+  - FE 도메인에서 `/api` 경로를 BE로 프록시해 refresh cookie를 same-site로 처리
+
+준비 권장 항목(병행 진행 가능):
+
+- 운영 알림 채널(이메일/슬랙) 준비
+- 비상 계정 운영 정책 승인
+- IP 개인정보 최소화 정책 확정
+  - 원문 IP 저장 대신 `ipHash(HMAC-SHA256 + 고정 서버 secret salt)` 사용
+  - 운영 중 secret 교체 금지(교체 시 기존 비교/조회 불가)
+
+## 6) 운영 UX 변화
+
+Before/After:
+
+- 로그인
+  - Before: 아이디/비밀번호 입력 및 세션 쿠키 기반 로그인(브라우저/크로스도메인 이슈 존재)
+  - After: Google 로그인 버튼 1개 + Authorization 기반 인증
+- 계정 생성
+  - Before: 수동 계정 생성/전달 중심
+  - After: 슈퍼어드민이 이메일 기반 초대 링크 발급 후 사용자 온보딩(초대 시 권한 사전 지정 가능)
+- 권한 변경
+  - Before: 권한 기준/변경 이력 가시성이 낮음
+  - After: 라벨 기반 권한 UI + 권한 변경 이력 확인
+- 초대 만료 관리
+  - Before: 만료 정책 운영 기준 불명확
+  - After: 기본 2일 정책을 기준으로 초대 만료값을 관리(슈퍼어드민 권한 범위 내 조정 가능)
+
+초대 플로우 상세:
+
+1. 슈퍼어드민이 이메일 1개를 입력해 해당 이메일 전용 초대 링크 1개를 생성한다.
+2. 초대 시 기본 권한은 읽기 전용(`read/all`)이며, 슈퍼어드민이 필요 시 write 권한을 사전 지정할 수 있다.
+3. 초대 링크는 만료 시간(기본 2일)을 포함하며, 만료/재발급 상태를 운영 화면에서 확인한다.
+4. 사용자가 링크 접속 후 Google 로그인하면, 로그인 이메일과 초대 이메일 일치 여부를 검증한다.
+5. 일치 시 `googleSub`를 계정에 바인딩하고 이후 로그인 식별 기준은 `googleSub`로 고정한다.
+
+## 7) Rollback Strategy
+
+- Phase 1 동안 기존 세션 로그인 경로를 임시 fallback으로 유지
+- 로그인 실패율 > 2% 또는 OAuth 오류율 급증 시 OAuth 경로 비활성화 후 기존 로그인으로 즉시 복구
+- Phase 3 완료 기준 충족 후 기존 로그인 경로 제거(rollback 비상 경로 제외)
+
+## 8) 비상 운영 절차
+
+- 판단 주체: PM + 온콜 백엔드 리드
+- 절차:
+  1. 장애 판단(로그인 실패율/에러율 기준)
+  2. 공지(운영 채널/사용자 안내)
+  3. fallback 적용
+  4. 원인 해결 후 OAuth 재활성화
+- 운영 리스크 공유:
+  - 감사 로그 저장소 장애 시 권한 변경/계정 상태 변경 API가 일시 중단될 수 있음
+  - 이 경우 읽기 중심 운영 모드를 유지하고 로그 저장소 복구 후 변경 작업을 재개
+- 사후 조치: 장애 리포트 및 재발 방지 백로그 등록
+
+## 9) Success Metrics
+
+- 인증 성공률 99.9% 이상 (서버 로그인 API 로그 기준)
+- 인증 실패율 baseline 대비 50% 이상 감소 (개편 전 7일 평균 대비)
+- 권한 관련 CS 티켓 0건 (Phase 3 완료 후 2주 기준)
+- 초대 플로우 E2E(초대 생성 -> 링크 접속 -> Google 로그인 -> 권한 부여) QA 통과
+- Staging 환경에서 운영자 계정 1개 이상 초대 플로우 온보딩 완료
+- 슈퍼어드민 권한 변경 시 대상 계정에 즉시 반영됨을 검증 완료
+
+## 10) 리소스 리스크 및 대응
+
+- 리스크: 단일 개발자 의존 구조
+- 대응:
+  - Phase 단위 배포로 리스크 분산
+  - 각 Phase 완료 시 중간 검증/승인
+  - Phase 2 지연 시 관리자 권한 변경 UI를 임시 제외하고, 슈퍼어드민 API/DB 운영 절차로 권한 변경을 대체해 기능 우선 배포
+  - 개발자 이탈/병가 발생 시 즉시 백엔드/프론트 대체 담당자를 지정하고, Phase 1(인증 안정화) 범위 우선으로 축소 운영
+
+## 11) 수용 기준
+
+- 2주 마일스톤 내 Phase 1~3 완료
+- 인증/권한/운영 절차가 문서 기준으로 인수 가능
+- 롤백/비상 대응 절차가 실제 운영 가능 상태
+- 기술 상세 항목은 Appendix 기준으로 구현/검증 완료
