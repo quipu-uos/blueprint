@@ -1,9 +1,16 @@
 # 02. Activity 동적 구성 기능 도입 (Activity CMS)
 
+> **📜 문서 수정 이력 (Changelog)**
+> **[2026-03-22 수정 사항]**
+> - **용어 및 계층 구조 명확화:** `Type(종류)` > `Field(속성)` > `Item(콘텐츠)` 3단계 구조로 용어 통일
+> - **속성명 변경:** 렌더링용 입력 양식임을 명확히 하기 위해 `Field`항목에 들어 있던 `type`을 `inputType`으로 변경
+> - **불변 식별자(Immutable Identifier) 도입:** 값이 변경될 소지가 있는 `name` 대신, 식별 고유 키값인 `typeId`, `fieldId`를 사용하도록 변경
+> - **시스템 아키텍처 명시:** 백오피스와 메인 웹 서버가 서로 API(구독) 통신하는 방식이 아닌, 동일한 MongoDB를 각각 직접 조회하는 Shared DB(Direct Connection) 구조 채택 및 역할 명시 (3.3 및 3.4 항목 도입)
+
 ## 1. 개요 및 목적
 기존 메인 웹의 Activity 영역(스터디, 세미나, 개발 등) 데이터는 프론트엔드 코드(`studyData.ts` 등) 내에 **하드코딩**되어 관리되고 있습니다. 이로 인해 새로운 활동이 추가되거나 속성(필드)이 변경될 때마다 개발자가 직접 코드를 수정하고 서버를 재배포해야 하는 비효율이 발생합니다.
 
-본 기능 명세는 백오피스에서 Activity의 **유형(Type)**과 **속성(Field)**, 그리고 실제 들어갈 **콘텐츠(Content)**를 운영진이 직접 정의하고 관리할 수 있는 **동적 CMS(Content Management System)**를 구축하여 운영 효율성(UX)과 시스템 확장성(DX)을 극대화하는 것을 목표로 합니다.
+본 기능 명세는 백오피스에서 Activity의 **유형(Type)** 과 **속성(Field)**, 그리고 실제 들어갈 **콘텐츠(Item)** 를 운영진이 직접 정의하고 관리할 수 있는 **동적 CMS(Content Management System)**를 구축하여 운영 효율성(UX)과 시스템 확장성(DX)을 극대화하는 것을 목표로 합니다.
 
 ---
 
@@ -54,14 +61,14 @@ graph LR
 
 ## 3. 핵심 아키텍처 및 해결 방안 (To-Be)
 
-우리가 만들 CMS는 **"구글 폼을 만드는 관리자 화면"**과 완벽하게 동일한 원리로 동작합니다.
+우리가 만들 CMS는 **"구글 폼을 만드는 관리자 화면"** 과 완벽하게 동일한 원리로 동작합니다.
 
 ### 3.1. 문제 해결 매핑 (As-Is ➡️ To-Be)
 2장에서 정의한 문제점들을 아래와 같은 기술적 전략으로 일대일(1:1) 매칭하여 해결합니다.
 
 | As-Is (해결할 문제점) | To-Be (기술적 해결 전략) | 관련 목차 |
 | --- | --- | --- |
-| **하드코딩으로 인한 개발자 종속성 및 확장성 한계**<br>(고정된 데이터 구조 & 잦은 재배포) | **데이터베이스(MongoDB) 기반 조회 및 Schema-driven UI 도입**<br>하드코딩 데이터를 DB로 완전 이관(Type/Field/Content 분리)하여, **프론트엔드 코드 수정 및 재배포 없이** 백오피스에서 즉시 메인 웹 화면(신규 필드 포함)을 유연하게 제어. | 3.3, 4, 5.2 |
+| **하드코딩으로 인한 개발자 종속성 및 확장성 한계**<br>(고정된 데이터 구조 & 잦은 재배포) | **데이터베이스(MongoDB) 기반 조회 및 Schema-driven UI 도입**<br>하드코딩 데이터를 DB로 완전 이관(Type/Field/Item 분리)하여, **프론트엔드 코드 수정 및 재배포 없이** 백오피스에서 즉시 메인 웹 화면(신규 필드 포함)을 유연하게 제어. | 3.3, 4, 5.2 |
 | **이미지 관리의 비효율성**<br>(코드 의존적 리소스 관리) | **Presigned URL 기반 다이렉트 클라우드 업로드**<br>스토리지 이미지와 DB URL 저장을 결합하여 프론트엔드 코드 배포와 파일 관리를 완전히 분리 | 5.1 |
 
 ### 3.2. 주요 용어 사전 (Glossary)
@@ -70,13 +77,13 @@ graph LR
 - **Type (활동의 종류) / `ActivityTypes` 컬렉션:** 
   - '스터디', '세미나', '해커톤' 등 메인 웹에서 하나의 **메뉴(탭)** 단위가 되는 큼직한 껍데기를 의미합니다. 
   - 백오피스에서 "새로운 활동 탭을 하나 만들자!"라고 할 때 이 Type을 하나 생성하게 됩니다.
-- **Field (질문 문항 / 설계도):** 
-  - 특정 Activity Type 안에서 데이터를 받기 위해 뚫어놓은 **입력칸(구멍)**들입니다. 
+- **Field / `ActivityField`(질문 문항 / 설계도):** 
+  - 특정 ActivityType 안에서 데이터를 받기 위해 뚫어놓은 **입력칸(항목)** 들입니다. 
   - 예시: 스터디 Type 내부의 '기간(Date)', '상세설명(LongText)', '사진(Image)' 필드들.
-  - 이 필드들이 모여서 하나의 "설문지 양식(Schema 설계도)"을 이룹니다.
-- **Content (실제 게시물 알맹이) / `ActivityContents` 컬렉션:** 
+  - 이 필드들이 모여서 하나의 "ActivityType(Schema 설계도)"을 이룹니다.
+- **Item (실제 게시물 알맹이) / `ActivityItems` 컬렉션:** 
   - 운영진이 만들어진 Field 양식에 맞춰 빈칸에 실제로 타이핑해서 넣은 **진짜 데이터(글, 사진)**입니다.
-  - 메인 웹에 예쁘게 그려지는 실제 스터디 카드 하나하나가 바로 이 Content입니다.
+  - 메인 웹에 예쁘게 그려지는 실제 활동들이 Item입니다.
 - **하드코딩 (Hardcoding):**
   - 데이터를 관리자 웹이나 DB에서 가져오지 않고, 개발자가 소스 코드 파일(예: `.ts`, `.json`) 안에 직접 텍스트로 박아 넣는 행위. 우리가 이 프로젝트에서 **없애려는 가장 큰 문제점(As-Is)**입니다.
 - **Schema-driven UI 패러다임:**
@@ -84,23 +91,38 @@ graph LR
 - **Presigned URL (사전 발급된 URL):**
   - 무거운 이미지나 파일을 사용자가 업로드할 때, 우리 백엔드 서버를 거치지 않게 하기 위해 **클라우드(AWS S3, Cloudflare R2 등)에서 발급받는 "일회용 클라우드 출입증 티켓"**입니다. 이 티켓을 쓰면 프론트엔드에서 클라우드로 파일을 직행시킬 수 있어 서버 부하가 줄어듭니다.
 
-### 3.3. 역할 분담
-퀴푸 프로젝트의 특성을 살려 프론트/백엔드 역할을 명확히 나눕니다.
-- **Backoffice Frontend:** 운영진이 Type과 Field를 동적으로 생성(설계)하고, 해당 양식에 Content(데이터)를 입력하는 UI. 드래그 앤 드롭 기능을 통해 필드나 카드의 **순서(order)**를 직관적으로 변경 가능.
-- **Backoffice Backend:** 운영진 권한을 확인하고, 입력받은 구조(Schema)와 데이터(JSON)를 MongoDB에 안전하게 저장(C/U/D).
-- **Main Backend:** 메인 웹 사용자들의 요청을 받아, MongoDB에서 데이터(Contents)를 꺼내 프론트엔드에 전달(R).
-- **Main Frontend:** 백엔드가 전달해 준 Type 메타데이터 구조를 파악해 메뉴(탭)를 동적으로 그리고, 그 안에 정의된 Field 설계도에 맞춰 카드를 **코딩 수정 없이 알아서 예쁘게 렌더링(Dynamic Rendering)** 됨.
+### 3.3. 역할 분담 
+
+#### 백오피스: "설계도를 만들고 데이터를 채우는 곳"
+- **Backoffice Frontend (기획 UX)** 
+  - 운영진이 마우스 조작만으로 `Type`과 `Field`를 동적으로 추가/삭제하는 **컨트롤 타워** 역할을 합니다.
+  - 드래그 앤 드롭 기능을 지원해, 노출할 필드나 실제 카드(`Item`)의 '순서(order)'를 직관적으로 조작합니다.
+- **Backoffice Backend (저장소 관리)**
+  - 운영 관리자로서의 권한을 깐깐하게 검증(Auth)합니다.
+  - 프론트엔드에서 조합된 자유로운 구조(Schema)의 양식과 실제 데이터(JSON)를 받아, MongoDB의 특성을 살려 에러 없이 유연하게 영구 저장(C/U/D)합니다.
+
+#### 메인 웹: "전달받은 설계도대로 렌더링"
+- **Main Backend (단순 정보 배달부)**
+  - 메인 접속자들에 대한 복잡한 시스템 로직을 줄이고, MongoDB에 저장된 '설계도와 내용물(Item)'을 꺼내어 화면 쪽에 안전하고 빠르게 **단순 전달(Read)** 해주는 역할을 합니다.
+- **Main Frontend (코어 렌더러)**
+  - 서버로부터 넘어온 `Type`, `Field`, `Item` 구조를 해석합니다.
+  - 사전에 정의된 규칙에 따라, **프론트엔드 소스 코드를 단 한 줄도 수정(재배포)하지 않고도** 그 안에 정의된 `Item(콘텐츠)`의 내용들을 알아서 예쁘게 화면에 그려냅니다(Dynamic Rendering).
+
+### 3.4. 시스템 간 DB 연결 구조 (Shared Database)
+서비스 간 의존도를 낮추고 운영 인프라를 단순화하기 위해, **백오피스와 메인 시스템이 서로 API로 통신하지 않고 동일한 MongoDB를 각각 직접 연결(Direct Connection)하여 조회하는 구조**를 채택합니다.
+- **단일 장애점(SPOF) 방지 및 의존성 분리:** 백오피스 백엔드가 API를 제공하고 메인 백엔드가 이를 호출(Fetch)하는 구독 형태를 피합니다. 이를 통해 백오피스 서버가 다운되거나 점검 중일 때도 메인 웹사이트의 고객 조회 트래픽에는 전혀 영향을 주지 않도록 격리합니다.
+- **직접 연결(Direct Connection):** 기존 퀴푸 아키텍처와 동일하게 `Backoffice Backend`와 `Main Backend`는 각각 독립적인 서버로 동작하며, 공통된 하나의 MongoDB 클러스터에 접속하여 각자의 역할(백오피스는 C/U/D 위주, 메인은 R 위주)에 맞게 쿼리합니다.
 
 ---
 
 ## 4. 데이터베이스 및 스키마 설계 (MongoDB)
 
 RDBMS처럼 고정된 열(Column)을 가지는 대신, 동적으로 변하는 데이터를 담기 위해 유연한 Document 구조(NoSQL)를 채택합니다.
-두 가지의 핵심 콜렉션(`ActivityTypes`, `ActivityContents`)으로 구성되며, 이에 대한 명확한 TypeScript 인터페이스 명세는 다음과 같습니다.
+두 가지의 핵심 컬렉션(`ActivityTypes`, `ActivityItems`)으로 구성되며, 이에 대한 명확한 TypeScript 인터페이스 명세는 다음과 같습니다.
 
-### 4.1. `ActivityTypes` Collection (양식 설계도 박스)
+### 4.1. `ActivityTypes` 컬렉션 (양식 설계도 박스)
 
-어떤 활동(Type)이 있고, 그 활동은 어떤 정보(Field)를 필요로 하는지 정의합니다.
+ActivityType은 어떤 활동(Type)이 있고, 그 활동은 어떤 항목(Field)를 필요로 하는지 정의합니다.
 
 ```typescript
 // [공통 타입] 메인/백오피스, 프론트엔드 및 백엔드 등 모든 영역에서 공통으로 사용되는 타입
@@ -117,9 +139,9 @@ type FieldType =
 
 // 개별 필드(질문 문항) 설계도
 interface ActivityField {
-  name: string;         // 데이터를 넣고 뺄 고유 영문 키 (예: "topic", "details")
+  fieldId: string;         // 데이터를 넣고 뺄 고유 영문 키 (예: "topic", "details"), 수정 불가
   label: string;        // 백오피스 입력 폼에 보여질 한글 라벨 (예: "주제", "상세 설명")
-  type: FieldType;      // 입력 필드의 형태 (프론트엔드 렌더링 기준)
+  inputType: FieldType;      // 입력 필드의 형태 (프론트엔드 렌더링 기준)
   required: boolean;    // 필수 입력 여부
   order: number;        // 백오피스 입력 폼에서의 출력 순서
   
@@ -131,10 +153,10 @@ interface ActivityField {
 }
 
 // [백엔드/공통 타입] DB 모델 스키마의 기준이자, 프론트엔드가 응답받게 되는 타입
-// 하나의 탭(스터디, 세미나 등)에 대한 전체 정의
+// 하나의 Type(스터디, 세미나 등)에 대한 전체 정의
 interface ActivityType {
   _id: ObjectId;
-  typeKey: string;             // (예: "study", "semina")
+  typeId: string;             // (예: "study", "semina") 수정 불가
   displayName: string;         // 메인 웹 네비게이션에 노출될 이름 (예: "스터디")
   description?: string;        // 활동에 대한 전반적인 설명
   order: number;               // 메인 웹 탭 메뉴에서의 노출 순서 (DnD 정렬용)
@@ -150,36 +172,36 @@ interface ActivityType {
 
 ```json
 {
-  "_id": "ObjectId",
-  "typeKey": "study",           // 스터디 고유 키값
+  "_id": "ObjectId",            // 몽고DB 자동 생성 id
+  "typeId": "study",           // 스터디 고유 키값, 수정 불가
   "displayName": "스터디",       // 메인 웹 네비게이션에 노출될 이름
   "description": "개발 공부부터 코딩 테스트까지 등등...",
   "order": 1,                   // 👈 메인 웹 네비게이션 메뉴 노출 순서
   "isActive": true,             // 메인 노출 여부 토글
   "fields": [                   // 💡 어떤 입력 항목(질문)을 받을 것인가?
     { 
-      "name": "topic",          // 나중에 실제 값을 꺼낼 키
+      "fieldId": "topic",          // 나중에 실제 값을 꺼낼 키
       "label": "주제",          // 백오피스 폼에 보일 질문 이름
-      "type": "shortText",      // 입력 타입 (Text, Date, Image 등 프론트엔드 렌더링 기준)
+      "inputType": "shortText",      // 입력 타입 (Text, Date, Image 등 프론트엔드 렌더링 기준)
       "required": true,
       "order": 1                // 👈 백오피스 입력 폼에서의 위치
     },
-    { "name": "date", "label": "기간", "type": "dateRange", "required": true, "order": 2 },
-    // ... 세미나 타입이라면 여기에 "name": "speaker" (발표자) 필드가 동적으로 들어감.
+    { "fieldId": "date", "label": "기간", "inputType": "dateRange", "required": true, "order": 2 },
+    // ... 세미나 타입이라면 여기에 "fieldId": "speaker" (발표자) 필드가 동적으로 들어감.
   ]
 }
 ```
 </details>
 
-### 4.2. `ActivityContents` Collection (실제 데이터 창고)
+### 4.2. `ActivityItems` 컬렉션 (실제 데이터 창고)
 
 Type 설계도에 맞춰 운영진이 직접 작성한 실제 게시물이 저장됩니다. 필드 값은 설계도의 `name`을 키로 하는 유연한 구조(`Record<string, any>`)를 가집니다.
 
 ```typescript
 // [백엔드/공통 타입] DB 모델 스키마의 기준이자, 프론트엔드가 응답받게 되는 실제 데이터 타입
-interface ActivityContent {
+interface ActivityItem {
   _id: ObjectId;
-  typeKey: string;             // 참조할 ActivityTypes의 typeKey
+  typeKey: string;             // 참조할 ActivityType의 typeKey
   order: number;               // 👈 동일 Type 내에서 리스트 노출 순서 (DnD 정렬용)
   isVisible: boolean;          // 승인/공개 여부 (임시저장 기능 등에 활용)
   
@@ -197,7 +219,7 @@ interface ActivityContent {
 ```json
 {
   "_id": "ObjectId",
-  "typeKey": "study",          // ActivityTypes 참조값
+  "typeKey": "study",          // ActivityType 참조값
   "order": 1,                  // 👈 해당 Type 내에서 리스트 노출 순서 (드래그 앤 드롭으로 변경됨)
   "isVisible": true,           // 승인/공개 여부
   "data": {                    // 💡 설계도(fields)의 규칙에 얽매이지 않고 들어가는 유연한 데이터 박스!
@@ -215,7 +237,7 @@ interface ActivityContent {
 ```
 </details>
 
-> **결론:** 메인 웹의 프론트엔드는 `ActivityTypes`를 조회해 탭을 구성하고 각 카드가 어떤 필드를 갖고 있는지 파악한 뒤, `ActivityContents`의 `data` 객체에서 해당 필드 값을 동적으로 꺼내어 화면을 그립니다.
+> **결론:** 메인 웹의 프론트엔드는 `ActivityType`를 조회해 탭을 구성하고 각 카드가 어떤 필드를 갖고 있는지 파악한 뒤, `ActivityItem`의 `data` 객체에서 해당 필드 값을 동적으로 꺼내어 화면을 그립니다.
 
 ---
 
@@ -226,40 +248,40 @@ interface ActivityContent {
 1. `Backoffice 프론트` ➡️ `Backoffice 백엔드`: "나 이미지 올릴 건데 클라우드 일회용 출입증(Presigned URL) 줘!" (권한/토큰 검사)
 2. `Backoffice 백엔드` ➡️ `Backoffice 프론트`: 발급된 티켓(URL) 전달
 3. `Backoffice 프론트` ➡️ `클라우드 스토리지`: 이미지 100% 직행 전송
-4. 업로드 완료 후 생성된 URL 텍스트만 `ActivityContents`의 `data.images` 배열에 저장.
+4. 업로드 완료 후 생성된 URL 텍스트만 `ActivityItem`의 `data.images` 배열에 저장.
 
 ### 5.2. 프론트엔드 동적 렌더링 (Dynamic UI Rendering) 및 신규 필드 추가 대응
 메인 프론트엔드는 더 이상 하드코딩된 값(`item.topic`)을 찾지 않습니다. 동적으로 변하는 키 값을 감지하여 예외 상황을 처리하는 **Schema-driven UI** 패턴을 적용합니다.
 
 - **유연한 렌더링 방식 (프론트엔드 무수정 원칙):**
   - 메인 프론트는 `item.data.mentor` 처럼 특정 필드 이름을 하드코딩해서 찾지 않습니다. 
-  - 대신, 백엔드가 전달해 준 설계도(`ActivityTypes`의 `fields` 배열)를 순회(`map`)하며, 설계도에 있는 필드 이름(`field.name`)으로 실제 데이터(`item.data[field.name]`)를 동적으로 꺼내서 화면에 그립니다.
+  - 대신, 백엔드가 전달해 준 설계도(`ActivityType`의 `fields` 배열)를 순회(`map`)하며, 설계도에 있는 필드 이름(`field.fieldId`)으로 실제 데이터(`item.data[field.fieldId]`)를 동적으로 꺼내서 화면에 그립니다.
   - 이 핵심 로직은 프론트엔드 코드에 아래와 같이 **단 한 번만 작성**됩니다.
 
   ```tsx
   // [메인 프로젝트: 프론트엔드] 코어 로직 - Schema-driven UI 렌더링 핵심 컴포넌트 예시
   function DynamicActivityCard({ schema, item }) {
     // schema: 백엔드에서 내려준 ActivityType (어떤 필드들이 있는지)
-    // item: 백엔드에서 내려준 ActivityContent 객체 전체 (단일 게시물)
+    // item: 백엔드에서 내려준 ActivityItem 객체 전체 (단일 게시물)
     
     return (
       <div className="card">
         {schema.fields.map((field) => {
           // 💡 포인트 1: 필드 이름표(e.g., 'mentor', 'topic')로 실제 데이터를 동적으로 뽑아옴
-          const fieldValue = item.data[field.name]; 
+          const fieldValue = item.data[field.fieldId]; 
           
           // 💡 포인트 2: 만약 이번 글에 이 항목(e.g., 새로 추가된 mentor)이 안 적혀있거나 값 타입이 안 맞으면? -> 부드럽게 생략! (Fallback)
           if (fieldValue === undefined || fieldValue === null) return null; 
 
-          // 💡 포인트 3: 어떤 타입의 질문(field.type)이었느냐에 따라 알아서 알맞은 UI 스위칭
-          switch (field.type) {
+          // 💡 포인트 3: 어떤 타입의 질문(field.inputType)이었느냐에 따라 알아서 알맞은 UI 스위칭
+          switch (field.inputType) {
             case 'shortText':
-              return <p key={field.name}><strong>{field.label}:</strong> {fieldValue}</p>;
+              return <p key={field.fieldId}><strong>{field.label}:</strong> {fieldValue}</p>;
             case 'longText':
-              return <div key={field.name} className="longText-box">{fieldValue}</div>;
+              return <div key={field.fieldId} className="longText-box">{fieldValue}</div>;
             case 'imageList':
               return (
-                <div key={field.name} className="image-list">
+                <div key={field.fieldId} className="image-list">
                   {/* imageList는 배열이므로 map으로 순회하여 렌더링합니다. */}
                   {Array.isArray(fieldValue) && fieldValue.map((url, idx) => (
                     <img key={idx} src={url} alt={`${field.label} ${idx + 1}`} />
@@ -267,7 +289,7 @@ interface ActivityContent {
                 </div>
               );
             default:
-              return <span key={field.name}>{fieldValue}</span>;
+              return <span key={field.fieldId}>{fieldValue}</span>;
           }
         })}
       </div>
@@ -281,7 +303,7 @@ interface ActivityContent {
 
 - **[백엔드 관점] Data Validation & Schema Delivery:**
   - 백엔드(Express + Mongoose)는 지나치게 자유로운 DB 입력을 제어하기 위해 최소한의 뼈대 스키마(예: `typeKey`, `isActive`, `data: Object`)만을 유지합니다.
-  - 백엔드의 역할은 메인 웹 접속자에게 해당 Activity의 구조(`ActivityTypes.fields`)와 내용(`ActivityContents`)을 가공 없이 빠르게 내려주는 API 허브 역할입니다.
+  - 백엔드의 역할은 메인 웹 접속자에게 해당 Activity의 구조(`ActivityType.fields`)와 내용(`ActivityItem`)을 가공 없이 빠르게 내려주는 API 허브 역할입니다.
 
 - **[프론트엔드 관점] 순수 렌더링 로직 (Zero-Code Modification):**
   - 메인 프론트는 `item.data.mentor` 처럼 특정 필드 이름을 하드코딩해서 찾지 않습니다.
@@ -292,7 +314,7 @@ interface ActivityContent {
 운영진이 특정 활동 탭(예: 스터디)이나 내부 게시물(예: 리액트 스터디 카드)의 노출 순서를 마음대로 바꿀 수 있어야 합니다. 각 파트별 역할은 다음과 같습니다.
 
 - **[DB 관점] 정렬의 기준점 (Numeric Index):**
-  - `ActivityTypes` (메뉴 탭)와 `ActivityContents` (게시물) 모두에 숫자형 필드인 `order` 를 필수값으로 추가합니다. 
+  - `ActivityType` (메뉴 탭)와 `ActivityItem` (게시물) 모두에 숫자형 필드인 `order` 를 필수값으로 추가합니다. 
 
 - **[프론트엔드 관점] 직관적인 UX (백오피스 전용):**
   - 운영진이 숫자를 수동으로 입력하게 하지 않습니다. DnD(Drag and Drop) 프론트엔드 라이브러리(e.g., `@hello-pangea/dnd` 또는 `dnd-kit`)를 활용해 마우스로 끌어다 놓는 리스트 정렬 UI를 제공합니다.
@@ -340,8 +362,8 @@ interface ActivityContent {
 ### 7.1 마이그레이션 방안
 과거 데이터들은 운영진이 수기로 직접 재입력하는 대신, **1회성 마이그레이션 스크립트**를 작성하여 자동화합니다.
 1. 기존 `.ts` 데이터를 파싱해서 JSON 객체 배열로 추출.
-2. 새롭게 구상한 `ActivityTypes` 스키마(예: shortText 타입 `topic`, dateRange 타입 `date`, imageList 타입 `images`)를 백오피스를 통해 선행 생성.
-3. Node.js (또는 단순 API 호출) 1회성 스크립트를 통해 JSON 데이터를 순회하며 `ActivityContents` DB 데이터로 일괄 생성(Bulk Insert).
+2. 새롭게 구상한 `ActivityType` 스키마(예: shortText 타입 `topic`, dateRange 타입 `date`, imageList 타입 `images`)를 백오피스를 통해 선행 생성.
+3. Node.js (또는 단순 API 호출) 1회성 스크립트를 통해 JSON 데이터를 순회하며 `ActivityItem` DB 데이터로 일괄 생성(Bulk Insert).
 
 ### 7.2 전환 타임라인 계획
 - **Phase 1:** MongoDB 뼈대 모델 설계 및 백오피스 API 구현 완료
