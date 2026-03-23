@@ -1,6 +1,9 @@
 # 02. Activity 동적 구성 기능 도입 (Activity CMS)
 
 > **📜 문서 수정 이력 (Changelog)**
+> **[2026-03-23 수정 사항]**
+> - **Orphaned Image (미사용 이미지) 방지 정책 추가:** 게시물 작성 중도 취소 시 클라이언트 측 즉각적인 클라우드 스토리지 비우기 및 주기적 잉여 이미지 일괄 제거(Cron) 정책 (5.1.2 항목) 반영
+>
 > **[2026-03-22 수정 사항]**
 > - **용어 및 계층 구조 명확화:** `Type(종류)` > `Field(속성)` > `Item(콘텐츠)` 3단계 구조로 용어 통일
 > - **속성명 변경:** 렌더링용 입력 양식임을 명확히 하기 위해 `Field`항목에 들어 있던 `type`을 `inputType`으로 변경
@@ -195,13 +198,13 @@ interface ActivityType {
 
 ### 4.2. `ActivityItems` 컬렉션 (실제 데이터 창고)
 
-Type 설계도에 맞춰 운영진이 직접 작성한 실제 게시물이 저장됩니다. 필드 값은 설계도의 `name`을 키로 하는 유연한 구조(`Record<string, any>`)를 가집니다.
+Type 설계도에 맞춰 운영진이 직접 작성한 실제 게시물이 저장됩니다. 필드 값은 설계도의 불변 식별자인 `fieldId`를 키로 하는 유연한 구조(`Record<string, any>`)를 가집니다.
 
 ```typescript
 // [백엔드/공통 타입] DB 모델 스키마의 기준이자, 프론트엔드가 응답받게 되는 실제 데이터 타입
 interface ActivityItem {
   _id: ObjectId;
-  typeKey: string;             // 참조할 ActivityType의 typeKey
+  typeKey: string;             // 부모격인 ActivityType의 typeId 참조값 (예: "study", "semina")
   order: number;               // 👈 동일 Type 내에서 리스트 노출 순서 (DnD 정렬용)
   isVisible: boolean;          // 승인/공개 여부 (임시저장 기능 등에 활용)
   
@@ -309,7 +312,7 @@ interface ActivityItem {
   - 기존 문서들은 해당 필드가 없는 채로 얌전히 유지되고, 새로 작성되는 문서에만 `mentor` 필드가 포함된 채로 안전하게 저장됩니다.
 
 - **[백엔드 관점] Data Validation & Schema Delivery:**
-  - 백엔드(Express + Mongoose)는 지나치게 자유로운 DB 입력을 제어하기 위해 최소한의 뼈대 스키마(예: `typeKey`, `isActive`, `data: Object`)만을 유지합니다.
+  - 백엔드(Express + Mongoose)는 지나치게 자유로운 DB 입력을 제어하기 위해 최소한의 뼈대 스키마(예: `typeKey`, `isVisible`, `data: Object`)만을 유지합니다.
   - 백엔드의 역할은 메인 웹 접속자에게 해당 Activity의 구조(`ActivityType.fields`)와 내용(`ActivityItem`)을 가공 없이 빠르게 내려주는 API 허브 역할입니다.
 
 - **[프론트엔드 관점] 순수 렌더링 로직 (Zero-Code Modification):**
@@ -344,15 +347,15 @@ interface ActivityItem {
 
 | Method | Path | 설명 |
 |--------|------|------|
-| `POST` | `/bo/activity-types` | 신규 활동 탭(Type) 및 필드(Field) 양식 생성 |
-| `GET` | `/bo/activity-types` | 전체 활동 탭 목록 및 스키마 조회 |
-| `PATCH` | `/bo/activity-types/:id` | 활동 탭 스키마(이름, 필드 구성 등) 수정 |
-| `PATCH` | `/bo/activity-types/order` | 드래그 앤 드롭을 통한 활동 탭 순서(order) 일괄 변경 |
-| `POST` | `/bo/activities` | 특정 양식(typeKey)에 맞춘 신규 콘텐츠(게시물) 작성 |
-| `GET` | `/bo/activities` | (백오피스용) 탭별 콘텐츠 전체 목록 조회 (비공개 콘텐츠 포함) |
-| `PATCH` | `/bo/activities/:id` | 콘텐츠 내용 수정 및 공개/비공개 토글 |
-| `PATCH` | `/bo/activities/order` | 탭 내 콘텐츠 노출 순서(order) 일괄 변경 |
-| `DELETE` | `/bo/activities/:id` | 콘텐츠 삭제 |
+| `POST` | `/bo/activity-types` | 신규 활동 Type 및 Field 양식 생성 |
+| `GET` | `/bo/activity-types` | 전체 활동 Type 목록 및 스키마 조회 |
+| `PATCH` | `/bo/activity-types/:id` | 활동 Type 스키마(이름, Field 구성 등) 수정 |
+| `PATCH` | `/bo/activity-types/order` | 드래그 앤 드롭을 통한 활동 Type 순서(order) 일괄 변경 |
+| `POST` | `/bo/activities` | 특정 양식(typeKey)에 맞춘 신규 Item(게시물) 작성 |
+| `GET` | `/bo/activities` | (백오피스용) Type별 Item(게시물) 전체 목록 조회 (비공개 콘텐츠 포함) |
+| `PATCH` | `/bo/activities/:id` | Item(게시물) 내용 수정 및 공개/비공개 토글 |
+| `PATCH` | `/bo/activities/order` | Type 내 Item(게시물) 노출 순서(order) 일괄 변경 |
+| `DELETE` | `/bo/activities/:id` | Item(게시물) 삭제 |
 
 ### 6.2 메인 웹 API (사용자 조회용)
 
@@ -362,6 +365,9 @@ interface ActivityItem {
 | `GET` | `/activities` | `?typeKey=study` 형태로 특정 탭의 공개된(isVisible: true) 콘텐츠 목록 조회 (order 순 자동 정렬) |
 
 > **인증 정책:** 메인 웹 API는 누구나 접근 가능한 Public API이며, 백오피스(`/bo/*`) API는 관리자 권한 확인 미들웨어 (Google OAuth 등)를 반드시 거쳐야 합니다.
+
+> **💡 API 네이밍 Note:** 
+> API 엔드포인트는 프론트엔드가 데이터를 다루는 관점에서의 직관성을 위해 통합 명칭인 `/activities`를 외부 모듈명으로 사용하지만, 백엔드 코어 모델에서는 이를 각각 `ActivityType`(양식) 및 `ActivityItem`(게시물) DB 모델로 정확히 매핑하여 처리합니다.
 
 ---
 
