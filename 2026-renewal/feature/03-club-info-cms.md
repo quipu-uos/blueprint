@@ -5,7 +5,7 @@ QUIPU Main Web 소스코드 내에 하드코딩되어 있던 동아리의 핵심
 
 ## 2. 목표
 - **최적의 UX (사용성):** 코딩 지식이 없는 운영진도 직관적으로 데이터를 입력, 수정, 배치할 수 있는 어드민 UI 제공.
-- **최적의 DX (확장성):** 프론트엔드와 백엔드 간의 명확한 타입 공유(TypeScript), 연도별/기수별 확장이 용이한 DB 스키마(MongoDB), 직관적이고 재사용 가능한 API 설계.
+- **최적의 DX (확장성):** 프론트엔드와 백엔드 간의 명확한 타입 공유(TypeScript), 기수별 확장이 용이한 DB 스키마(MongoDB), 직관적이고 재사용 가능한 API 설계.
 
 ---
 
@@ -15,18 +15,16 @@ QUIPU Main Web 소스코드 내에 하드코딩되어 있던 동아리의 핵심
 
 #### 3.1.1. 임원진 (Executive) 정보 관리
 - **필드 구성:**
-  - `year` (Number): 활동 연도 / 기수 (예: 2025)
+  - `cohort` (Number): 기수 (예: 41)
   - `name` (String): 이름
   - `position` (String): 직책 (예: 회장, 부회장, 학술부장 등)
   - `department` (String): 소속 학과
-  - `studentId` (String): 학번 (예: 20학번)
+  - `studentId` (Number): 학번 (예: 20학번 -> 20)
   - `phone` (String): 연락처 (관리자 참고용, 노출 여부 선택 가능)
-  - `interview` (Text/Markdown): 인터뷰 내용 (Main Web의 Interview 섹션 노출용)
+  - `interview` (Text): 인터뷰 내용 (Main Web의 Interview 섹션 노출용)
   - `profileImage` (URL): 프로필 이미지 주소 (이미지 업로드 기능 포함)
-  - `isActive` (Boolean): 현재 메인 웹 노출 여부
   - `order` (Number): 정렬 순서
 - **UX/기능 요구사항:**
-  - 연도별/기수별 임원진 목록 필터링 조회.
   - 드래그 앤 드롭(Drag & Drop)을 활용한 임원진 표시 순서(`order`) 직관적 변경.
   - 텍스트가 긴 인터뷰 항목의 경우 Markdown 에디터 또는 텍스트 영역(Textarea)을 통한 편리한 작성 지원.
 
@@ -35,8 +33,6 @@ QUIPU Main Web 소스코드 내에 하드코딩되어 있던 동아리의 핵심
   - `type` (Enum): 링크 종류 (Homepage, Instagram, GitHub, Email 등)
   - `url` (String): 연결 URL 또는 이메일 주소
   - `label` (String): 사용자에게 보여질 표시 텍스트
-  - `iconType` (String): 프론트엔드 아이콘 라이브러리 식별자
-  - `isActive` (Boolean): 노출 활성화 여부
   - `order` (Number): 정렬 순서
 - **UX/기능 요구사항:**
   - 단일 페이지 내에서 인라인(Inline) 형태의 빠른 CRUD 처리.
@@ -46,16 +42,14 @@ QUIPU Main Web 소스코드 내에 하드코딩되어 있던 동아리의 핵심
 - **필드 구성:**
   - `category` (String): 질문 카테고리 (예: 지원 관련, 활동 관련, 기술 관련 등)
   - `question` (String): 질문 내용
-  - `answer` (Text/Markdown): 답변 내용
-  - `isActive` (Boolean): 노출 활성화 여부
+  - `answer` (String): 답변 내용
   - `order` (Number): 정렬 순서
 - **UX/기능 요구사항:**
   - 카테고리 분류 추가/수정/삭제 기능.
   - 아코디언 형태의 메인 웹 렌더링을 고려한 질문-답변 세트 관리.
-  - 답변 작성 시 굵은 글씨, 링크 삽입 등을 위한 기본적인 Rich Text 기능 지원.
 
 ### 3.2. 메인 웹 (Main Web) 반영 (렌더링) 영역
-- **Interview 영역:** 활성화된(`isActive: true`) 당해 연도 임원진 정보를 `order` 순으로 조회하여 인터뷰 카드와 프로필 렌더링.
+- **Interview 영역:** 당해 연도 임원진 정보를 `order` 순으로 조회하여 인터뷰 카드와 프로필 렌더링.
 - **Footer 영역:** 활성화된 대외 링크 정보를 조회하여 아이콘 및 텍스트 링크로 렌더링.
 - **FAQ 영역:** 카테고리별로 그룹화된 활성 FAQ 데이터를 `order` 순으로 렌더링 (아코디언 UI 적용).
 
@@ -69,14 +63,13 @@ QUIPU Main Web 소스코드 내에 하드코딩되어 있던 동아리의 핵심
 ```typescript
 // 예시: Mongoose Schema - 임원진 정보
 const ExecutiveSchema = new mongoose.Schema({
-  year: { type: Number, required: true, index: true }, // 기수/연도 기반 조회 성능 최적화
+  cohort: { type: Number, required: true }, // 기수 기반 조회 성능 최적화
   name: { type: String, required: true },
   position: { type: String, required: true },
   department: { type: String },
-  studentId: { type: String },
+  studentId: { type: Number },
   interview: { type: String },
   profileImage: { type: String },
-  isActive: { type: Boolean, default: true },
   order: { type: Number, default: 0 }
 }, { timestamps: true });
 ```
@@ -85,14 +78,13 @@ const ExecutiveSchema = new mongoose.Schema({
 프론트엔드에서 직관적으로 사용할 수 있는 일관된 엔드포인트를 제공합니다.
 
 - **Executives (임원진)**
-  - `GET /api/v1/club-info/executives` (Query: `year`, `isActive`)
+  - `GET /api/v1/club-info/executives` (Query: `cohort`)
   - `POST /api/v1/club-info/executives`
   - `PUT /api/v1/club-info/executives/:id`
   - `PATCH /api/v1/club-info/executives/reorder` (배열 형태의 id를 받아 일괄 순서 업데이트)
 - **External Links & FAQs** 도 위와 동일한 CRUD 규칙 및 라우트 구조 적용 (`/external-links`, `/faqs`).
 
 ---
-
 ## 5. 아키텍처 및 구현 전략 (UX & DX 통합)
 
 ### 5.1. 타입 안정성 (Type Safety) 확보
