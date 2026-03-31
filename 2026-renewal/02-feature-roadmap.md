@@ -2,7 +2,8 @@
 
 ## 1. [Must] 백오피스 인증 및 권한 체계 고도화
 - 담당자: 어진원
-- 문서: [01-bo-auth.md](./feature/01-bo-auth.md)
+- 문서1: [01-bo-auth.md](./feature/01-bo-auth.md)
+- 문서2: [01-bo-auth-appendix.md](./feature/01-bo-auth-appendix.md)
 
 백오피스 인증을 Google OAuth 기반으로 전환하고, 운영 권한을 역할 단위로 분리한다.
 
@@ -32,7 +33,7 @@
 ---
 
 ## 3. [Must] 동아리 공통 정보 관리의 백오피스 일원화
-- 담당자: 최재혁, 이건희
+- 담당자: 최재혁, 이건희, 박송우
 - 문서: [03-club-info-cms.md](./feature/03-club-info-cms.md)
 
 동아리 핵심 정보를 백오피스에서 관리하고, 메인 웹의 필요한 곳곳에서 해당 데이터를 조회하여 렌더링한다.
@@ -51,7 +52,7 @@
 ---
 
 ## 4. [Must] 모집 폼의 동적 구성 기능 도입
-- 담당자: 오형규, 김민건
+- 담당자: 김민건
 - 문서: [04-recruit-form-cms.md](./feature/04-recruit-form-cms.md)
 
 모집 폼을 고정 양식에서 벗어나, 백오피스에서 동적으로 설계·운영 가능한 구조로 전환한다.
