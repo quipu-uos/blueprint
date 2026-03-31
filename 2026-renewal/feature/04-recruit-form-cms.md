@@ -484,12 +484,38 @@ sequenceDiagram
     Note over User: 사용자가 폼 작성 중...
     Note over Server: 운영자가 폼 수정 (version: 4)
     User->>Server: POST /recruit-form/submit { formId, formVersion: 3, answers }
-    Server-->>User: 409 Conflict "폼이 수정되었습니다. 새로고침 후 다시 제출해주세요."
+    Server-->>User: 200 OK (formVersion 3 기준으로 제출 수락)
 ```
 
 - 제출 시 클라이언트는 `formId`와 함께 조회한 폼의 `version`을 전송한다.
-- 서버는 현재 폼의 `version`과 비교하여 불일치 시 **409 Conflict**를 반환하고, 사용자에게 재조회를 안내한다.
+- 서버는 제출된 `formVersion`이 현재 폼의 `version`과 다르더라도 **제출을 수락**한다. 작성 중이던 응답 유실을 방지하기 위함이다.
+- 응답에는 제출 시점의 `formVersion`을 함께 저장하여, 어떤 버전의 폼 기준으로 작성되었는지 추적한다.
 - 운영자는 **모집 기간 중 불필요한 수정을 자제해야 한다.**
+
+#### 고정 필드 (Fixed Fields) 정책
+
+폼 버전이 변경되더라도 항상 유지되는 **고정 필드**를 정의한다:
+
+| 고정 필드 | 용도 |
+|-----------|------|
+| 이름 | 식별, 목록 표시 |
+| 학번 | 중복 체크, 식별 |
+| 학과 | 목록 표시 |
+| 이메일 | 연락, 단체 메일 |
+
+- 고정 필드는 published 상태에서 삭제하거나 타입을 변경할 수 없다.
+- 백오피스 응답 목록(테이블)에서는 고정 필드 중심으로 렌더링한다.
+- 각 row 클릭 시 모달에서 해당 응답의 `formVersion`에 맞는 폼 정의를 기준으로 상세 응답을 렌더링한다.
+
+#### 버전별 데이터 처리
+
+- **백오피스 테이블**: 고정 필드(이름, 학번, 학과, 이메일)를 컬럼으로 표시. 버전에 무관하게 동일한 형태.
+- **모달 상세**: 응답의 `formVersion`에 해당하는 폼 정의를 참조하여 필드별 라벨-값 쌍을 렌더링.
+- **CSV/Excel export**: 버전별로 시트를 분리하여 출력. 각 시트는 해당 버전의 폼 필드를 컬럼으로 사용.
+
+#### published 상태 수정 제한 강화
+
+published 상태에서는 **폼 구성(필드 추가/삭제/타입 변경)을 불허**한다. 옵션 라벨, 필드 라벨, 검증 규칙 등 비구조적 속성만 변경 가능하며, 변경 시 `version`이 +1 된다.
 
 ### 6.5 options 변경 정책
 
@@ -506,7 +532,7 @@ sequenceDiagram
 백엔드 제출 처리 시 다음을 순서대로 수행한다:
 
 1. **폼 상태 체크** — `status === "published"`인지 확인
-2. **폼 버전 체크** — 클라이언트가 보낸 `formVersion`과 현재 폼 `version` 비교
+2. **폼 버전 기록** — 클라이언트가 보낸 `formVersion`을 응답에 저장 (구버전 제출도 허용)
 3. **중복 제출 체크** — `duplicateCheckField` 기반
 4. **가시성 재평가** — 클라이언트가 보낸 answers를 기준으로 각 필드/섹션의 `conditionalLogic`을 재평가하여 visible 필드 목록을 서버에서 독립적으로 산출
 5. **visible 필드만 validation** — `required`, `validation[]` 규칙, **선택형 필드의 option value 유효성** (폼 정의에 존재하는 값인지) 모두 체크
@@ -610,6 +636,8 @@ gantt
 |--------|------|------|
 | `GET` | `/bo/recruit-form/:id/responses` | 응답 목록 (페이지네이션: `?cursor=&limit=20`) |
 | `GET` | `/bo/recruit-form/:id/responses/:responseId` | 응답 상세 |
+| `POST` | `/bo/recruit-form/:id/responses` | 응답 수동 추가 (백오피스에서만 가능) |
+| `PUT` | `/bo/recruit-form/:id/responses/:responseId` | 응답 수정 (백오피스에서만 가능) |
 | `DELETE` | `/bo/recruit-form/:id/responses/:responseId` | 응답 삭제 (백오피스에서만 가능) |
 | `GET` | `/bo/recruit-form/:id/responses/:responseId/file/:fieldId` | 파일 다운로드 (시간 제한 서명 URL, 만료 1시간) |
 
@@ -839,10 +867,8 @@ async function handleSubmit(formId: string, formVersion: number, answers: FieldA
     throw new BadRequestError("현재 모집 기간이 아닙니다.");
   }
 
-  // 2. 폼 버전 동시성 체크
-  if (form.version !== formVersion) {
-    throw new ConflictError("폼이 수정되었습니다. 새로고침 후 다시 제출해주세요.");
-  }
+  // 2. 폼 버전 기록 (구버전 제출도 허용 — 작성 중 응답 유실 방지)
+  // formVersion은 응답에 저장하여 버전별 추적에 사용
 
   // 3. 중복 제출 체크
   if (form.settings.duplicateCheckField) {
@@ -884,26 +910,38 @@ async function handleSubmit(formId: string, formVersion: number, answers: FieldA
 
 ## 12. 파일 업로드 처리
 
-### 12.1 업로드 흐름
+### 12.1 업로드 흐름 (Presigned URL 방식)
+
+> **방침:** `02-activity-cms`에서 제안된 Presigned URL 방식과 통일한다. 초기 구현에서는 파일 URL을 직접 입력받는 간단한 방식으로 시작하고, `02-activity-cms`의 파일 업로드 기능이 완성되면 해당 컴포넌트를 재사용한다.
 
 ```mermaid
 flowchart LR
-    A["메인 웹에서<br/>multipart/form-data 제출"] --> B["백엔드에서<br/>file_upload 타입 필드 식별"]
-    B --> C["fileConfig 검증<br/>(accept, maxSizeMB, maxFiles)<br/>프론트+백엔드 양쪽 수행"]
-    C --> D["R2에 업로드"]
-    D --> E["RecruitResponse.answers에<br/>files[] 저장"]
-    E --> F["백오피스 조회 시<br/>시간 제한 서명 URL 발급"]
+    A["프론트엔드에서<br/>Presigned URL 요청"] --> B["백엔드에서<br/>fileConfig 검증<br/>(accept, maxSizeMB, maxFiles)"]
+    B --> C["Presigned URL 발급"]
+    C --> D["프론트엔드에서<br/>R2에 직접 업로드"]
+    D --> E["업로드 완료 후<br/>파일 URL을 폼 제출에 포함"]
+    E --> F["RecruitResponse.answers에<br/>files[] 저장"]
+    F --> G["백오피스 조회 시<br/>시간 제한 서명 URL 발급"]
 ```
+
+#### 초기 구현 (Phase 1)
+- `file_upload` 타입 필드에서 파일 URL을 텍스트로 입력받는 방식으로 시작.
+- 프론트엔드 파일 선택 UI 없이, 외부 업로드 후 URL 붙여넣기.
+
+#### 완성 구현 (Phase 2 — `02-activity-cms` 완성 후)
+- `02-activity-cms`에서 구현된 Presigned URL 업로드 컴포넌트를 재사용.
+- 프론트엔드에서 Cloudflare R2에 직접 업로드하고, 발급된 URL을 답변에 저장.
 
 ### 12.2 기존 대비 변경점
 
 | 항목 | 기존 | 변경 |
 |------|------|------|
-| 파일 필드 수 | `upload.single("portfolio_pdf")` — 1개 고정 | `upload.any()` — 폼 정의의 `file_upload` 필드 수만큼 동적 |
+| 업로드 방식 | `multipart/form-data` → 백엔드 중계 | Presigned URL → 프론트엔드에서 R2 직접 업로드 |
+| 파일 필드 수 | `upload.single("portfolio_pdf")` — 1개 고정 | 폼 정의의 `file_upload` 필드 수만큼 동적 |
 | 파일 수 | 필드당 1개 | `maxFiles`에 따라 필드당 N개 |
 | 파일명 패턴 | `퀴푸_25_1-${student_id}${name}` 하드코딩 | `recruit/{formId}/{responseId}/{fieldId}/{originalFilename}` |
 | 다운로드 | filename 기반 고정 API | responseId + fieldId 기반 → 시간 제한 서명 URL (만료 1시간) |
-| accept 검증 | 없음 | **프론트엔드**: `<input accept>` 속성 + 클라이언트 MIME 체크. **백엔드**: 파일 MIME 타입을 `fileConfig.accept`와 매칭 (`image/*` 와일드카드 포함) |
+| accept 검증 | 없음 | **프론트엔드**: `<input accept>` 속성 + 클라이언트 MIME 체크. **백엔드**: Presigned URL 발급 시 `fileConfig.accept`와 매칭 |
 | 응답 저장 | 단일 `fileInfo` 객체 | `files: FileInfo[]` 배열 (단일/다중 통일) |
 
 ### 12.3 업로드 실패 복구
@@ -997,7 +1035,7 @@ stateDiagram-v2
 | published → closed | 언제든 가능. |
 | closed → published | 다른 published 폼이 없어야 함. (모집 재개) |
 | closed → archived | 언제든 가능. |
-| published 상태에서 수정 | 필드 삭제 불가. 옵션/라벨/검증 등은 자유 변경. version +1. |
+| published 상태에서 수정 | 필드 추가/삭제/타입 변경 불가. 옵션/라벨/검증 등 비구조적 속성만 변경 가능. version +1. |
 
 ---
 
@@ -1283,11 +1321,11 @@ frontend/src/
 | **기본 섹션** | 폼 생성 시 기본 섹션 1개 자동 생성. 필드는 반드시 섹션에 소속. |
 | **섹션 단위 조건부 표시** | `FormSection.conditionalLogic` 지원 |
 | **응답 있는 폼 삭제** | 불가 (응답 데이터 보호) |
-| **응답 있는 폼 수정** | 필드 삭제 불가. 옵션/라벨/검증 등은 자유 변경. version +1. |
-| **응답 삭제** | 백오피스에서만 가능 |
+| **응답 있는 폼 수정** | 필드 추가/삭제/타입 변경 불가. 옵션/라벨/검증 등 비구조적 속성만 변경 가능. version +1. |
+| **응답 CRUD** | 백오피스에서 조회/추가/수정/삭제 모두 가능 |
 | **숨김/스킵 필드** | 값을 clear하고, 제출 payload에서 제외하며, 백엔드 validation에서도 제외한다. |
 | **백엔드 검증** | 프론트엔드를 신뢰하지 않는다. 가시성 재평가 + option value 유효성 포함 전체 재검증. |
-| **폼 버전 동시성** | 제출 시 `formVersion` 전송. 불일치 시 409 Conflict. |
+| **폼 버전 동시성** | 제출 시 `formVersion` 전송. 구버전 제출도 허용 (응답 유실 방지). 응답에 `formVersion` 저장하여 버전별 추적. |
 | **숫자 입력** | 별도 number 타입 없음. `short_text` + `pattern/min/max`로 처리. |
 | **파일 응답 구조** | `files: FileInfo[]` 배열로 통일 (단일/다중 무관). |
 | **파일 accept 검증** | 프론트엔드 + 백엔드 양쪽에서 수행. |
@@ -1295,7 +1333,7 @@ frontend/src/
 | **Regex 안전성** | preset + custom 모두 지원. custom은 길이 200자 제한 + `safe-regex` 검증. |
 | **파일 업로드 실패** | R2 업로드 성공 → DB 실패 시 즉시 삭제 + 일일 배치 orphan 정리. |
 | **파일 저장소** | 기존 Cloudflare R2 유지 |
-| **데이터 export** | CSV 형식. 프론트엔드에서 빌드. |
+| **데이터 export** | Excel 형식. 버전별 시트 분리. 프론트엔드에서 빌드. |
 | **응답 목록 페이지네이션** | cursor 기반 (`?cursor=&limit=20`) |
 | **미리보기** | 메인 웹 폼 렌더러를 iframe으로 로드 (preview 모드) |
 | **학과 목록** | 폼 필드의 dropdown options로 이관 (하드코딩 제거) |
@@ -1306,12 +1344,25 @@ frontend/src/
 
 ---
 
-## 19. 리스크 및 대응
+## 19. 확장 기능 (향후 고려)
+
+### 19.1 단체 메일 발송
+
+제출 DB에 저장된 이메일을 활용하여 지원자에게 일괄 안내 메일을 발송하는 기능.
+
+- **용도**: 합격/불합격 안내, 카카오톡 오픈채팅 링크 전달, 일정 공지 등
+- **발송 대상**: 백오피스에서 필터링된 응답 목록의 이메일 필드 기준
+- **구현 방향**: Nodemailer 또는 외부 메일 서비스(SendGrid, AWS SES 등) 연동
+- **우선순위**: 낮음 (핵심 모집 기능 완성 후 검토)
+
+---
+
+## 20. 리스크 및 대응
 
 | 리스크 | 영향 | 대응 |
 |--------|------|------|
 | 01-bo-auth 지연 | 백오피스 API 개발 블로킹 | 메인 웹 공개 API(#2, #3)는 인증 불필요하므로 선행 개발 가능. 백오피스 API는 임시 미들웨어로 개발 후 전환. |
 | MongoDB Atlas 연결 설정 | 개발 환경 구성 지연 | 로컬 MongoDB로 먼저 개발, Atlas는 배포 시 전환. |
 | 메인 웹 전환 실패 시 | 모집 기간 중 장애 | 전환 전 충분한 QA 진행. published → closed로 되돌려 접수 일시 중단 가능. |
-| 폼 버전 충돌 빈도 | 모집 기간 중 수정 시 작성 중인 사용자 전원이 409 | 운영 가이드로 "모집 기간 중 불필요한 수정 자제" 안내. 긴급 수정 시 공지 후 진행. |
+| 폼 버전 혼재 | 모집 기간 중 수정 시 서로 다른 버전의 응답이 혼재 | 구버전 제출 허용 + 응답에 `formVersion` 저장. 백오피스에서 버전별 렌더링/시트 분리로 대응. 운영 가이드로 "모집 기간 중 불필요한 수정 자제" 안내. |
 | iframe 미리보기 CORS | 백오피스↔메인 웹 도메인이 다르면 iframe 통신 제한 | 메인 웹에 preview 전용 엔드포인트를 두고, `X-Frame-Options` 허용 설정. |
